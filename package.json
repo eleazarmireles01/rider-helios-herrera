@@ -4,16 +4,16 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node server.js",
-    "postinstall": "node node_modules/puppeteer/install.mjs"
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@sparticuz/chromium": "^147.0.0",
     "express": "^5.2.1",
     "pdf-lib": "^1.17.1",
-    "puppeteer": "^24.40.0"
+    "puppeteer-core": "^24.40.0"
   }
 }

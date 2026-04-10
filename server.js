@@ -1,12 +1,37 @@
 'use strict';
 
-// Render / Linux: keep Chromium cache inside /tmp to survive ephemeral filesystems
-process.env.PUPPETEER_CACHE_DIR = '/tmp/.cache/puppeteer';
-
 const express   = require('express');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const { PDFDocument } = require('pdf-lib');
 const path = require('path');
+
+/**
+ * Build platform-aware Puppeteer launch options.
+ * - Linux/Render: @sparticuz/chromium (self-contained, no system Chrome needed)
+ * - macOS/Windows (local dev): system Google Chrome
+ */
+async function getLaunchOptions() {
+  if (process.platform === 'linux') {
+    const chromium = require('@sparticuz/chromium');
+    return {
+      args:            chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath:  await chromium.executablePath(),
+      headless:        chromium.headless,
+    };
+  }
+  // macOS local dev — use system Chrome
+  return {
+    headless: 'new',
+    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+    ],
+  };
+}
 
 const app  = express();
 const PORT = 3000;
@@ -32,19 +57,7 @@ app.post('/generate-pdf', async (req, res) => {
 
   let browser;
   try {
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu',
-      ],
-    });
+    browser = await puppeteer.launch(await getLaunchOptions());
 
     const page = await browser.newPage();
 
