@@ -1,5 +1,8 @@
 'use strict';
 
+// Render / Linux: keep Chromium cache inside /tmp to survive ephemeral filesystems
+process.env.PUPPETEER_CACHE_DIR = '/tmp/.cache/puppeteer';
+
 const express   = require('express');
 const puppeteer = require('puppeteer');
 const { PDFDocument } = require('pdf-lib');
@@ -31,7 +34,16 @@ app.post('/generate-pdf', async (req, res) => {
   try {
     browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu',
+      ],
     });
 
     const page = await browser.newPage();
