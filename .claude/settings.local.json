@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Read(//private/tmp/**)",
+      "Bash(python3 -c \" import subprocess, re out = subprocess.check_output\\(['pdfinfo', '/tmp/test_rider.pdf'], stderr=subprocess.DEVNULL\\).decode\\(\\) print\\(out\\) \")",
+      "Bash(node -e ':*)",
+      "Bash(python3 -c ':*)",
+      "Bash(python3)",
+      "Bash(pkill -f \"node server.js\")",
+      "Bash(node server.js)",
+      "Bash(curl -s -X POST http://localhost:3000/generate-pdf -H 'Content-Type: application/json' -d '{\"pax\":80}' -o /tmp/rider_80.pdf)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -X POST http://localhost:3000/generate-pdf -H 'Content-Type: application/json' -d '{\"pax\":400}' -o /tmp/rider_400.pdf)",
+      "Bash(curl -s -X POST http://localhost:3000/generate-pdf -H 'Content-Type: application/json' -d '{\"pax\":80}' -o /tmp/r80.pdf)",
+      "Bash(curl -s -X POST http://localhost:3000/generate-pdf -H 'Content-Type: application/json' -d '{\"pax\":250}' -o /tmp/r250.pdf)",
+      "Bash(curl -s -X POST http://localhost:3000/generate-pdf -H 'Content-Type: application/json' -d '{\"pax\":600}' -o /tmp/r600.pdf)",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(ls /tmp/rider_*.pdf.png)",
+      "Bash(open /tmp/rider_80.pdf /tmp/rider_400.pdf /tmp/rider_1500.pdf)",
+      "Bash(open -a \"Preview\" /tmp/rider_80.pdf)",
+      "Bash(open -a \"Preview\" /tmp/rider_400.pdf)",
+      "Bash(open -a \"Preview\" /tmp/rider_1500.pdf)",
+      "Bash(curl -s -X POST http://localhost:3000/generate-pdf -H 'Content-Type: application/json' -d '{\"pax\":400}' -o /tmp/rider_400_hd.pdf)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(open -a \"Preview\" /tmp/rider_400_hd.pdf)"
+    ]
+  }
+}
