@@ -98,20 +98,21 @@ app.post('/generate-pdf', async (req, res) => {
       return el.screenshot({ type: 'png' });
     }
 
-    const [png1, png2] = await Promise.all([
+    const [png1, png2, png3] = await Promise.all([
       screenshotEl('#riderPage1'),
       screenshotEl('#riderPage2'),
+      screenshotEl('#riderPage3'),
     ]);
 
     await browser.close();
     browser = null;
 
-    // Build a 2-page A4 PDF (595.28 × 841.89 pt)
+    // Build a 3-page A4 PDF (595.28 × 841.89 pt)
     const pdfDoc = await PDFDocument.create();
     const A4_W  = 595.28;
     const A4_H  = 841.89;
 
-    for (const pngBuf of [png1, png2]) {
+    for (const pngBuf of [png1, png2, png3]) {
       const img = await pdfDoc.embedPng(pngBuf);
       const pg  = pdfDoc.addPage([A4_W, A4_H]);
       pg.drawImage(img, { x: 0, y: 0, width: A4_W, height: A4_H });
