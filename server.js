@@ -1,15 +1,17 @@
 'use strict';
 
-const express   = require('express');
-const puppeteer = require('puppeteer-core');
+const express        = require('express');
+const puppeteer      = require('puppeteer-core');
 const { PDFDocument } = require('pdf-lib');
-const path = require('path');
+const path           = require('path');
+const fs             = require('fs');
 
-/**
- * Build platform-aware Puppeteer launch options.
- * - Linux/Render: @sparticuz/chromium (self-contained, no system Chrome needed)
- * - macOS/Windows (local dev): system Google Chrome
- */
+// ─── Constants ───────────────────────────────────────────────────────────────
+const PORT     = 3000;
+const LOGO_URL = 'https://heliosherrera.mx/wp-content/uploads/2023/05/logo_blanco_1.webp';
+const HTML_PATH = path.join(__dirname, 'rider_helios_herrera.html');
+
+// ─── Platform-aware Puppeteer launch options ─────────────────────────────────
 async function getLaunchOptions() {
   if (process.platform === 'linux') {
     const chromium = require('@sparticuz/chromium');
@@ -24,79 +26,98 @@ async function getLaunchOptions() {
   return {
     headless: 'new',
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-    ],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
   };
 }
 
-const app  = express();
-const PORT = 3000;
+// ─── OPT 1: Browser singleton ────────────────────────────────────────────────
+// Launch Chromium once at startup; reuse across all requests.
+let browserInstance = null;
 
+async function getBrowser() {
+  if (!browserInstance) {
+    browserInstance = await puppeteer.launch(await getLaunchOptions());
+    // If the browser crashes, reset so the next request relaunches it
+    browserInstance.on('disconnected', () => { browserInstance = null; });
+  }
+  return browserInstance;
+}
+
+// ─── OPT 2: Logo pre-cached as base64 ────────────────────────────────────────
+// Download once at startup; inject into every HTML response so Puppeteer
+// never makes an outbound network request during PDF generation.
+let logoBase64 = null;
+
+async function getLogo() {
+  if (!logoBase64) {
+    try {
+      const res    = await fetch(LOGO_URL);
+      const buffer = Buffer.from(await res.arrayBuffer());
+      logoBase64   = 'data:image/webp;base64,' + buffer.toString('base64');
+      console.log('  Logo cached ✓');
+    } catch (err) {
+      console.warn('  Logo fetch failed — will use URL fallback:', err.message);
+      logoBase64 = LOGO_URL;   // graceful fallback
+    }
+  }
+  return logoBase64;
+}
+
+// ─── Express app ─────────────────────────────────────────────────────────────
+const app = express();
 app.use(express.json());
 
-// Serve the HTML file
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'rider_helios_herrera.html'));
+// Serve HTML with logo URL replaced by cached base64
+app.get('/', async (req, res) => {
+  try {
+    let html  = fs.readFileSync(HTML_PATH, 'utf8');
+    const logo = await getLogo();
+    html = html.replaceAll(LOGO_URL, logo);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) {
+    res.status(500).send('Error serving HTML: ' + err.message);
+  }
 });
 
-/**
- * POST /generate-pdf
- * Body: { pax: number }
- *
- * 1. Opens the HTML in headless Chromium via Puppeteer.
- * 2. Calls updateRider(pax) to apply slider value.
- * 3. Screenshots each .rider-page (794×1122 px) individually.
- * 4. Builds a 2-page A4 PDF with pdf-lib and streams it back.
- */
+// ─── POST /generate-pdf ───────────────────────────────────────────────────────
 app.post('/generate-pdf', async (req, res) => {
   const pax = Math.max(50, Math.min(2000, parseInt(req.body?.pax, 10) || 400));
 
-  let browser;
+  let page;
   try {
-    browser = await puppeteer.launch(await getLaunchOptions());
+    const browser = await getBrowser();
+    page = await browser.newPage();
 
-    const page = await browser.newPage();
+    // OPT 3: deviceScaleFactor 2 → 1588×2244 px (≈190 DPI on A4) — fast & sharp
+    await page.setViewport({ width: 794, height: 1122 * 3 + 100, deviceScaleFactor: 2 });
 
-    // CSS pixels match the .rider-page size (794×1122).
-    // deviceScaleFactor:3 renders at 2382×3366 physical px ≈ 286 DPI on A4,
-    // visually equivalent to a 300 DPI print.
-    const CSS_W = 794;
-    const CSS_H = 1122;
-    const SCALE = 3;
-    await page.setViewport({ width: CSS_W, height: CSS_H * 2 + 100, deviceScaleFactor: SCALE });
-
+    // OPT 5: domcontentloaded — logo is already base64, nothing to wait for on the network
     await page.goto(`http://localhost:${PORT}/`, {
-      waitUntil: 'networkidle0',
+      waitUntil: 'domcontentloaded',
       timeout: 30000,
     });
 
-    // Apply pax value exactly as the interactive slider does
+    // Apply slider value
     await page.evaluate((p) => {
       document.getElementById('paxSlider').value = p;
       updateRider(p);
     }, pax);
 
-    // Hide sticky control panel and remove preview-area padding so pages
-    // sit at known top offsets (0 and CSS_H px respectively).
+    // Hide UI chrome so pages sit flush
     await page.evaluate(() => {
       const panel = document.querySelector('.control-panel');
       if (panel) panel.style.display = 'none';
-      const area = document.querySelector('.preview-area');
+      const area  = document.querySelector('.preview-area');
       if (area) { area.style.padding = '0'; area.style.gap = '0'; }
     });
 
-    // Capture each page at exact element bounds — Puppeteer scales
-    // coordinates by deviceScaleFactor automatically, so the output PNG
-    // is CSS_W*SCALE × CSS_H*SCALE pixels.
-    async function screenshotEl(selector) {
+    // OPT 4: Screenshots in parallel (already was, kept explicit)
+    const screenshotEl = async (selector) => {
       const el = await page.$(selector);
       if (!el) throw new Error(`Element not found: ${selector}`);
       return el.screenshot({ type: 'png' });
-    }
+    };
 
     const [png1, png2, png3] = await Promise.all([
       screenshotEl('#riderPage1'),
@@ -104,13 +125,12 @@ app.post('/generate-pdf', async (req, res) => {
       screenshotEl('#riderPage3'),
     ]);
 
-    await browser.close();
-    browser = null;
+    await page.close();
 
-    // Build a 3-page A4 PDF (595.28 × 841.89 pt)
+    // Build 3-page A4 PDF
     const pdfDoc = await PDFDocument.create();
-    const A4_W  = 595.28;
-    const A4_H  = 841.89;
+    const A4_W   = 595.28;
+    const A4_H   = 841.89;
 
     for (const pngBuf of [png1, png2, png3]) {
       const img = await pdfDoc.embedPng(pngBuf);
@@ -119,20 +139,26 @@ app.post('/generate-pdf', async (req, res) => {
     }
 
     const pdfBytes = await pdfDoc.save();
-    const filename = `Rider_Helios_Herrera_${pax}pax.pdf`;
-
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="Rider_Helios_Herrera_${pax}pax.pdf"`);
     res.send(Buffer.from(pdfBytes));
 
   } catch (err) {
-    if (browser) await browser.close();
+    if (page) await page.close().catch(() => {});
     console.error('PDF generation error:', err);
     res.status(500).send('Error generating PDF: ' + err.message);
   }
 });
 
-app.listen(PORT, () => {
+// ─── Startup ──────────────────────────────────────────────────────────────────
+// Pre-warm browser and logo in parallel so the first request is instant
+app.listen(PORT, async () => {
   console.log(`\n  Rider server  →  http://localhost:${PORT}`);
   console.log(`  PDF endpoint  →  POST http://localhost:${PORT}/generate-pdf  { pax: 400 }\n`);
+  // Warm up in background — don't block startup
+  Promise.all([getBrowser(), getLogo()]).then(() => {
+    console.log('  Browser & logo pre-warmed ✓\n');
+  }).catch(err => {
+    console.warn('  Pre-warm failed (will retry on first request):', err.message);
+  });
 });
